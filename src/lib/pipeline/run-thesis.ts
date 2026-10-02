@@ -32,11 +32,23 @@ const DEFAULT_LIMITS: Required<ThesisRunLimits> = {
 };
 
 /**
- * The staged funnel from the product spec: a wide, cheap search narrows to a
- * small number of companies that receive expensive Companies House ingestion,
- * accounts extraction and scoring.
+ * How long one research batch may run. Serverless functions are killed at
+ * five minutes, so a batch stops well short of that and hands the rest of the
+ * shortlist to a follow-up job.
  */
-export async function runThesis(runId: string, limits: ThesisRunLimits = {}): Promise<ThesisRunSummary> {
+const RESEARCH_BUDGET_MS = 180_000;
+
+export interface ThesisSearchResult extends ThesisRunSummary {
+  /** Shortlisted company numbers, best first, still to be researched. */
+  shortlist: string[];
+}
+
+/**
+ * Stages 1 and 2 of the funnel from the product spec: a wide, cheap search
+ * narrowed to a shortlist. The expensive research on that shortlist happens
+ * in {@link researchShortlist}, in batches.
+ */
+export async function searchThesis(runId: string, limits: ThesisRunLimits = {}): Promise<ThesisSearchResult> {
   const db = getAdminClient();
   const caps = { ...DEFAULT_LIMITS, ...limits };
 
@@ -65,24 +77,64 @@ export async function runThesis(runId: string, limits: ThesisRunLimits = {}): Pr
       .sort((a, b) => (b.prescore ?? 0) - (a.prescore ?? 0))
       .slice(0, caps.candidates);
 
-    await markStage(runId, candidates.map(({ item }) => companyIds.get(item.company_number)), 'candidate');
+    await markStage(runId, candidates.map(({ item }) => companyIds.get(item.company_number)), 'candidate', 'universe');
     await db
       .from('thesis_runs')
-      .update({ stage: 'research', candidates: candidates.length })
+      .update({ stage: 'research', candidates: candidates.length, enriched: 0, scored: 0 })
       .eq('id', runId);
 
-    // Stage 3 — expensive work on the shortlist only.
-    const deep = candidates.slice(0, caps.deepResearch);
-    let researched = 0;
-    let scored = 0;
+    const shortlist = candidates.slice(0, caps.deepResearch).map(({ item }) => item.company_number);
+    if (shortlist.length === 0) await completeRun(runId);
 
-    for (const { item } of deep) {
+    return {
+      runId,
+      companiesFound: universe.length,
+      candidates: candidates.length,
+      researched: 0,
+      scored: 0,
+      shortlist,
+    };
+  } catch (error) {
+    await failRun(runId, error);
+    throw error;
+  }
+}
+
+/**
+ * Stage 3 — expensive work on the shortlist only. Researches companies in
+ * order until the time budget runs out and returns the ones still to do; the
+ * caller queues those as the next batch. The run completes with the last one.
+ */
+export async function researchShortlist(
+  runId: string,
+  shortlist: string[],
+  budgetMs = RESEARCH_BUDGET_MS,
+): Promise<{ researched: number; scored: number; remaining: string[] }> {
+  const db = getAdminClient();
+  const startedAt = Date.now();
+
+  const { data: run } = await db.from('thesis_runs').select('*').eq('id', runId).maybeSingle();
+  if (!run) throw new Error(`Thesis run ${runId} not found.`);
+
+  const thesis = await loadThesis(run.thesis_id as string);
+  if (!thesis) throw new Error(`Thesis ${run.thesis_id} not found.`);
+
+  let researched = Number(run.enriched ?? 0);
+  let scored = Number(run.scored ?? 0);
+  const remaining = [...shortlist];
+
+  try {
+    while (remaining.length > 0 && Date.now() - startedAt < budgetMs) {
+      const companyNumber = remaining.shift()!;
       try {
-        await ingestCompany(item.company_number, { includeAccounts: true, maxDocuments: 4 });
+        await ingestCompany(companyNumber, { includeAccounts: true, maxDocuments: 4 });
         researched++;
 
-        const result = await scoreAndPersist(item.company_number, thesis);
-        if (result) scored++;
+        const result = await scoreAndPersist(companyNumber, thesis);
+        if (result) {
+          scored++;
+          await markStage(runId, [result.dossier.company.id ?? undefined], 'scored');
+        }
 
         await db
           .from('thesis_runs')
@@ -93,36 +145,33 @@ export async function runThesis(runId: string, limits: ThesisRunLimits = {}): Pr
           level: 'warn',
           scope: 'thesis-run',
           message: 'Company research failed; continuing with the rest of the shortlist',
-          companyNumber: item.company_number,
+          companyNumber,
           context: { error: String(error) },
         });
       }
     }
 
-    await markStage(runId, deep.map(({ item }) => companyIds.get(item.company_number)), 'scored');
-
-    await db
-      .from('thesis_runs')
-      .update({
-        status: 'COMPLETE',
-        stage: 'complete',
-        companies_found: universe.length,
-        candidates: candidates.length,
-        enriched: researched,
-        scored,
-        finished_at: new Date().toISOString(),
-      })
-      .eq('id', runId);
-
-    return { runId, companiesFound: universe.length, candidates: candidates.length, researched, scored };
+    if (remaining.length === 0) await completeRun(runId);
+    return { researched, scored, remaining };
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    await db
-      .from('thesis_runs')
-      .update({ status: 'FAILED', error: message, finished_at: new Date().toISOString() })
-      .eq('id', runId);
+    await failRun(runId, error);
     throw error;
   }
+}
+
+async function completeRun(runId: string): Promise<void> {
+  await getAdminClient()
+    .from('thesis_runs')
+    .update({ status: 'COMPLETE', stage: 'complete', finished_at: new Date().toISOString() })
+    .eq('id', runId);
+}
+
+async function failRun(runId: string, error: unknown): Promise<void> {
+  const message = error instanceof Error ? error.message : String(error);
+  await getAdminClient()
+    .from('thesis_runs')
+    .update({ status: 'FAILED', error: message, finished_at: new Date().toISOString() })
+    .eq('id', runId);
 }
 
 async function searchUniverse(thesis: AcquisitionThesis, limit: number): Promise<CHAdvancedSearchItem[]> {
@@ -207,7 +256,10 @@ async function recordUniverse(
   }));
 
   for (let i = 0; i < rows.length; i += 500) {
-    await db.from('thesis_run_companies').upsert(rows.slice(i, i + 500), { onConflict: 'run_id,company_id' });
+    // ignoreDuplicates: a retried search must not reset companies already scored.
+    await db
+      .from('thesis_run_companies')
+      .upsert(rows.slice(i, i + 500), { onConflict: 'run_id,company_id', ignoreDuplicates: true });
   }
 
   return ids;
@@ -217,17 +269,20 @@ async function markStage(
   runId: string,
   companyIds: Array<string | undefined>,
   stage: string,
+  onlyFrom?: string,
 ): Promise<void> {
   const ids = companyIds.filter((id): id is string => Boolean(id));
   if (ids.length === 0) return;
 
   const db = getAdminClient();
   for (let i = 0; i < ids.length; i += 200) {
-    await db
+    let query = db
       .from('thesis_run_companies')
       .update({ stage_reached: stage })
       .eq('run_id', runId)
       .in('company_id', ids.slice(i, i + 200));
+    if (onlyFrom) query = query.eq('stage_reached', onlyFrom);
+    await query;
   }
 }
 

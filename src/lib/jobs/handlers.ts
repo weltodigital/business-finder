@@ -4,7 +4,8 @@ import { enrichCompany } from '@/lib/enrichment';
 import { analyseTarget } from '@/lib/ai/analyse-target';
 import { ingestCompany } from '@/lib/pipeline/ingest-company';
 import { scoreAndPersist } from '@/lib/pipeline/score-company';
-import { runThesis } from '@/lib/pipeline/run-thesis';
+import { researchShortlist, searchThesis } from '@/lib/pipeline/run-thesis';
+import { enqueueJob } from './queue';
 import { loadThesis } from '@/lib/repository/theses';
 import type { JobHandler } from './queue';
 
@@ -66,10 +67,28 @@ export const jobHandlers: Record<string, JobHandler> = {
     return { assessment: analysis.overall_assessment, model };
   },
 
+  // A run is a chain of jobs: the first searches and shortlists, each later
+  // one researches a time-boxed batch and queues the next with what is left.
   thesis_run: async (job) => {
     if (!job.run_id) throw new Error('Thesis run job is missing run_id.');
-    const summary = await runThesis(job.run_id, (job.payload.limits as Record<string, number>) ?? {});
-    return { ...summary };
+
+    let shortlist = job.payload.shortlist as string[] | undefined;
+    if (!Array.isArray(shortlist)) {
+      const search = await searchThesis(job.run_id, (job.payload.limits as Record<string, number>) ?? {});
+      shortlist = search.shortlist;
+      if (shortlist.length === 0) return { ...search };
+    }
+
+    const batch = await researchShortlist(job.run_id, shortlist);
+    if (batch.remaining.length > 0) {
+      await enqueueJob('thesis_run', {
+        runId: job.run_id,
+        userId: job.user_id,
+        payload: { shortlist: batch.remaining },
+        priority: 10,
+      });
+    }
+    return { researched: batch.researched, scored: batch.scored, remaining: batch.remaining.length };
   },
 };
 

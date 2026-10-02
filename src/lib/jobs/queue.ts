@@ -46,6 +46,8 @@ export async function runPendingJobs(
   let processed = 0;
   let failed = 0;
 
+  await releaseStaleJobs();
+
   for (let i = 0; i < limit; i++) {
     const { data: pending } = await db
       .from('jobs')
@@ -102,6 +104,46 @@ export async function runPendingJobs(
   }
 
   return { processed, failed };
+}
+
+/** Longer than the 300s function limit, so anything older was killed mid-job. */
+const STALE_AFTER_MS = 6 * 60_000;
+
+/**
+ * A function killed by its time limit never finishes its job, leaving it
+ * PROCESSING forever. Put such jobs back in the queue, or fail them once they
+ * have used up their attempts.
+ */
+async function releaseStaleJobs(): Promise<void> {
+  const db = getAdminClient();
+  const { data: stale } = await db
+    .from('jobs')
+    .select('id, attempts, run_id')
+    .eq('status', 'PROCESSING')
+    .lt('started_at', new Date(Date.now() - STALE_AFTER_MS).toISOString());
+
+  for (const job of (stale ?? []) as { id: string; attempts: number; run_id: string | null }[]) {
+    const attempts = job.attempts + 1;
+    const status: JobStatus = attempts >= MAX_ATTEMPTS ? 'FAILED' : 'PENDING';
+    await db
+      .from('jobs')
+      .update({
+        status,
+        attempts,
+        error: 'Timed out before finishing.',
+        finished_at: status === 'FAILED' ? new Date().toISOString() : null,
+      })
+      .eq('id', job.id)
+      .eq('status', 'PROCESSING');
+
+    // Otherwise the run would show as in progress forever.
+    if (status === 'FAILED' && job.run_id) {
+      await db
+        .from('thesis_runs')
+        .update({ status: 'FAILED', error: 'Research timed out repeatedly.', finished_at: new Date().toISOString() })
+        .eq('id', job.run_id);
+    }
+  }
 }
 
 /** Optimistic claim: only succeeds if the job is still PENDING. */
