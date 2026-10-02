@@ -87,11 +87,42 @@ export function parseXbrl(source: string): XbrlParseResult {
     });
   });
 
+  correctBalanceSheetTotals(facts);
+
   const periodEnds = Array.from(
     new Set(facts.map((f) => f.periodEnd).filter((d): d is string => Boolean(d))),
   ).sort((a, b) => b.localeCompare(a));
 
   return { facts, method, contextsFound: contexts.size, periodEnds };
+}
+
+/**
+ * Some accounts software tags the balance sheet total — liabilities plus
+ * equity — as TotalLiabilities, so it equals total assets. Read literally,
+ * that leaves no room for the net assets the same document reports and the
+ * accounts fail validation. Where that pattern appears, replace it with the
+ * liabilities it implies.
+ */
+function correctBalanceSheetTotals(facts: ExtractedFact[]): void {
+  const byPeriod = new Map<string, Partial<Record<string, ExtractedFact>>>();
+  for (const fact of facts) {
+    const key = fact.periodEnd ?? '';
+    const group = byPeriod.get(key) ?? {};
+    group[fact.metric] ??= fact;
+    byPeriod.set(key, group);
+  }
+
+  for (const group of byPeriod.values()) {
+    const assets = group.total_assets;
+    const liabilities = group.total_liabilities;
+    const netAssets = group.net_assets;
+    if (!assets || !liabilities || !netAssets || netAssets.value === 0) continue;
+    if (Math.abs(liabilities.value - assets.value) > 1) continue;
+
+    liabilities.value = assets.value - netAssets.value;
+    liabilities.isReported = false;
+    liabilities.sourceLocation = `${liabilities.sourceLocation} (balance sheet total; liabilities derived as total assets less net assets)`;
+  }
 }
 
 function collectContexts($: cheerio.CheerioAPI): Map<string, XbrlContext> {

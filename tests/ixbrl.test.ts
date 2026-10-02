@@ -103,6 +103,19 @@ describe('parseXbrl', () => {
     expect(facts.find((f) => f.metric === 'net_profit')?.value).toBe(-347_000);
   });
 
+  it('derives liabilities when TotalLiabilities is really the balance sheet total', () => {
+    const doc = `<html xmlns:ix="http://www.xbrl.org/2013/inlineXBRL" xmlns:xbrli="http://www.xbrl.org/2003/instance">
+      <xbrli:context id="BS"><xbrli:period><xbrli:instant>2024-05-31</xbrli:instant></xbrli:period></xbrli:context>
+      <ix:nonFraction name="core:TotalAssets" contextRef="BS" unitRef="GBP">139,374</ix:nonFraction>
+      <ix:nonFraction name="core:TotalLiabilities" contextRef="BS" unitRef="GBP">139,374</ix:nonFraction>
+      <ix:nonFraction name="core:Equity" contextRef="BS" unitRef="GBP">65,022</ix:nonFraction>
+    </html>`;
+    const { facts } = parseXbrl(doc);
+    const liabilities = facts.find((f) => f.metric === 'total_liabilities');
+    expect(liabilities?.value).toBe(74_352);
+    expect(liabilities?.isReported).toBe(false);
+  });
+
   it('treats instant contexts as balance sheet dates', () => {
     const { facts } = parseXbrl(IXBRL_ACCOUNTS);
     const cash = facts.find((f) => f.metric === 'cash');
