@@ -736,6 +736,11 @@ const SIC_DESCRIPTIONS: Record<string, string> = {
   '99999': "Dormant Company",
 };
 
+/** Every SIC 2007 code with its description, in code order. */
+export const SIC_CODE_LIST: { code: string; description: string }[] = Object.entries(SIC_DESCRIPTIONS).map(
+  ([code, description]) => ({ code, description }),
+);
+
 /** The Companies House description for a SIC code, or null when unknown. */
 export function sicDescription(code: string): string | null {
   return SIC_DESCRIPTIONS[code] ?? null;

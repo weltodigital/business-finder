@@ -1,14 +1,17 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Card, ErrorNotice } from '@/components/primitives';
-import { SIC_GROUPS, codesForLabels, keywordsForLabels } from '@/lib/sic';
+import { SIC_GROUPS, SIC_SECTORS, codesForLabels, keywordsForLabels } from '@/lib/sic';
+import { SIC_CODE_LIST, sicDescription } from '@/lib/sic-descriptions';
 
 export function SearchForm() {
   const router = useRouter();
   const [name, setName] = useState('');
   const [industries, setIndustries] = useState<string[]>([]);
+  const [extraCodes, setExtraCodes] = useState<string[]>([]);
+  const [codeQuery, setCodeQuery] = useState('');
   const [locations, setLocations] = useState('');
   const [radius, setRadius] = useState('');
   const [revenueMin, setRevenueMin] = useState('1000000');
@@ -28,6 +31,20 @@ export function SearchForm() {
     );
   }
 
+  const codeMatches = useMemo(() => {
+    const query = codeQuery.trim().toLowerCase();
+    if (query.length < 2) return [];
+    return SIC_CODE_LIST.filter(
+      ({ code, description }) =>
+        !extraCodes.includes(code) && (code.startsWith(query) || description.toLowerCase().includes(query)),
+    ).slice(0, 8);
+  }, [codeQuery, extraCodes]);
+
+  function addCode(code: string) {
+    setExtraCodes((current) => (current.includes(code) ? current : [...current, code]));
+    setCodeQuery('');
+  }
+
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     setBusy(true);
@@ -40,9 +57,11 @@ export function SearchForm() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name: name.trim() || `${industries[0] ?? 'Search'} — ${locationList[0] ?? 'UK'}`,
+          name:
+            name.trim() ||
+            `${industries[0] ?? (extraCodes[0] ? sicDescription(extraCodes[0]) : null) ?? 'Search'} — ${locationList[0] ?? 'UK'}`,
           industries,
-          sicCodes: codesForLabels(industries),
+          sicCodes: Array.from(new Set([...codesForLabels(industries), ...extraCodes])),
           geography: {
             locations: locationList,
             postcodePrefixes: [],
@@ -84,24 +103,83 @@ export function SearchForm() {
     <Card>
       <form onSubmit={submit} className="divide-y divide-line">
         <Section title="What type of business are you looking for?">
-          <div className="grid gap-1.5 sm:grid-cols-2">
-            {SIC_GROUPS.map((group) => (
-              <label
-                key={group.label}
-                className="flex cursor-pointer items-start gap-2 rounded border border-line px-2.5 py-2 text-sm hover:bg-surface-sunken"
-              >
-                <input
-                  type="checkbox"
-                  className="mt-0.5"
-                  checked={industries.includes(group.label)}
-                  onChange={() => toggleIndustry(group.label)}
-                />
-                <span>
-                  <span className="block">{group.label}</span>
-                  <span className="block text-[11px] text-ink-faint">SIC {group.codes.join(', ')}</span>
-                </span>
-              </label>
+          <div className="space-y-3">
+            {SIC_SECTORS.map((sector) => (
+              <div key={sector}>
+                <h3 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-ink-muted">{sector}</h3>
+                <div className="grid gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
+                  {SIC_GROUPS.filter((group) => group.sector === sector).map((group) => (
+                    <label
+                      key={group.label}
+                      className="flex cursor-pointer items-start gap-2 rounded border border-line px-2.5 py-2 text-sm hover:bg-surface-sunken"
+                      title={group.codes.map((code) => `${code} ${sicDescription(code) ?? ''}`).join('\n')}
+                    >
+                      <input
+                        type="checkbox"
+                        className="mt-0.5"
+                        checked={industries.includes(group.label)}
+                        onChange={() => toggleIndustry(group.label)}
+                      />
+                      <span>
+                        <span className="block">{group.label}</span>
+                        <span className="block text-[11px] text-ink-faint">SIC {group.codes.join(', ')}</span>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </div>
             ))}
+
+            <div>
+              <h3 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-ink-muted">
+                Any other business type
+              </h3>
+              <div className="relative">
+                <input
+                  className="input"
+                  placeholder="Search all SIC codes, e.g. bakery, kennels, 43290"
+                  value={codeQuery}
+                  onChange={(e) => setCodeQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      if (codeMatches[0]) addCode(codeMatches[0].code);
+                    }
+                  }}
+                />
+                {codeMatches.length > 0 && (
+                  <ul className="absolute z-10 mt-1 w-full overflow-hidden rounded border border-line bg-surface shadow-sm">
+                    {codeMatches.map(({ code, description }) => (
+                      <li key={code}>
+                        <button
+                          type="button"
+                          className="flex w-full gap-2 px-2.5 py-1.5 text-left text-sm hover:bg-surface-sunken"
+                          onClick={() => addCode(code)}
+                        >
+                          <span className="tabular-nums text-ink-faint">{code}</span>
+                          <span>{description}</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+              {extraCodes.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {extraCodes.map((code) => (
+                    <button
+                      key={code}
+                      type="button"
+                      className="rounded border border-line px-2 py-0.5 text-xs hover:bg-surface-sunken"
+                      onClick={() => setExtraCodes((current) => current.filter((c) => c !== code))}
+                      title="Remove"
+                    >
+                      {code} {sicDescription(code)} ×
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </Section>
 
