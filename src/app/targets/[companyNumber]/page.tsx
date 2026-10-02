@@ -11,6 +11,7 @@ import { Card, EmptyState, PageHeader, ScoreBadge, VisibilityBadge } from '@/com
 import { ScoreBreakdown } from '@/components/score-breakdown';
 import { FinancialChart, FinancialHistory, FinancialTrend } from '@/components/financials';
 import { SignalList } from '@/components/signals';
+import { sicDescription } from '@/lib/sic-descriptions';
 import { shortDate, titleCase, yearsOld } from '@/lib/utils';
 import { TargetActions } from './target-actions';
 import { AiAssessment } from './ai-assessment';
@@ -55,7 +56,7 @@ export default async function TargetPage({ params }: { params: { companyNumber: 
           titleCase(c.status),
           c.region ?? c.postcode ?? 'location unknown',
           age === null ? 'age unknown' : `${age} years old`,
-          `SIC ${c.sicCodes.join(', ') || 'none'}`,
+          c.sicCodes.length ? c.sicCodes.map((code) => sicDescription(code) ?? `SIC ${code}`).join(', ') : 'SIC none',
         ].join(' · ')}
         action={
           <div className="flex items-center gap-3">

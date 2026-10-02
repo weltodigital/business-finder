@@ -203,7 +203,9 @@ export function RunResults({ runId }: { runId: string }) {
                       </div>
                     </td>
                     <td className="text-ink-muted">{row.region ?? row.postcode ?? '—'}</td>
-                    <td className="text-ink-muted">{row.sicCodes[0] ?? '—'}</td>
+                    <td className="text-ink-muted" title={row.sicCodes.length ? `SIC ${row.sicCodes.join(', ')}` : undefined}>
+                      {row.industry ?? '—'}
+                    </td>
                     <td className="num">{row.revenue === null ? <NotDisclosed /> : money(row.revenue)}</td>
                     <td className="num">
                       {row.operatingProfit === null ? <NotDisclosed /> : money(row.operatingProfit)}

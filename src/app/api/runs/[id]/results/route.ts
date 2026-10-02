@@ -1,6 +1,7 @@
 import { apiError, json, withUser } from '@/lib/api';
 import { getAdminClient } from '@/lib/supabase/admin';
 import { getServerClient } from '@/lib/supabase/server';
+import { sicDescription } from '@/lib/sic-descriptions';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,6 +12,8 @@ export interface SearchResultRow {
   postcode: string | null;
   incorporationDate: string | null;
   sicCodes: string[];
+  /** Description of the primary SIC code, for display. */
+  industry: string | null;
   status: string | null;
   score: number | null;
   successionSignal: number | null;
@@ -92,6 +95,7 @@ export const GET = withUser<{ id: string }>(async ({ params, user }) => {
     const score = scoreByCompany.get(id);
     const summary = summaryByCompany.get(id);
     const companySignals = signalsByCompany.get(id) ?? [];
+    const primarySic = ((company.sic_codes as string[]) ?? [])[0] ?? null;
 
     return {
       companyNumber: company.company_number as string,
@@ -100,6 +104,7 @@ export const GET = withUser<{ id: string }>(async ({ params, user }) => {
       postcode: (company.postcode as string) ?? null,
       incorporationDate: (company.incorporation_date as string) ?? null,
       sicCodes: (company.sic_codes as string[]) ?? [],
+      industry: primarySic ? sicDescription(primarySic) ?? primarySic : null,
       status: (company.status as string) ?? null,
       score: score ? Number(score.total_score) : null,
       successionSignal: score ? Number(score.succession_signal) : null,

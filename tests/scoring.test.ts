@@ -88,6 +88,26 @@ describe('scoreCompany', () => {
     expect(financial.reasons[0].detail).toMatch(/not a judgement on performance/i);
   });
 
+  it('does not score a partially disclosed company below one that disclosed nothing', () => {
+    const dossier = fixtureDossier('01000001', ASOF)!;
+    // Micro-entity style accounts: a balance sheet but no profit and loss.
+    dossier.financials = {
+      ...dossier.financials,
+      financialVisibility: 'MEDIUM',
+      revenueCagr: null,
+      latestOperatingMargin: null,
+      profitConsistency: null,
+      latestRevenue: null,
+      latestCash: null,
+      latestCurrentRatio: null,
+      latestNetAssets: null,
+    };
+    const result = scoreCompany(dossier, detectSignals(dossier), { thesis: THESIS, asOf: ASOF });
+    const financial = result.components.find((c) => c.key === 'financial_quality')!;
+
+    expect(financial.score).toBe(DEFAULT_SCORING_CONFIG.components.financial_quality.unknown_score);
+  });
+
   it('separates insufficient information from poor performance', () => {
     const missingAccounts = score('01000004');
     const distressed = score('01000003');

@@ -99,6 +99,9 @@ function financialQuality(dossier: CompanyDossier, config: ScoringConfig): Score
     };
   }
 
+  // Every measure that cannot be assessed earns a neutral half-score, so a
+  // partially disclosed company lands around the same midpoint as a LOW
+  // visibility one and only moves away from it on what is actually disclosed.
   let score = 0;
 
   if (fin.revenueCagr !== null) {
@@ -145,6 +148,14 @@ function financialQuality(dossier: CompanyDossier, config: ScoringConfig): Score
       points,
       detail: `Profitable in ${Math.round(fin.profitConsistency * 100)}% of the periods on record.`,
     });
+  } else {
+    const points = rules.rules.profit_consistency.max / 2;
+    score += points;
+    reasons.push({
+      label: 'Profit consistency',
+      points,
+      detail: 'Profit is not disclosed, so consistency cannot be measured. A neutral half-score is applied.',
+    });
   }
 
   const cashRatio =
@@ -165,7 +176,15 @@ function financialQuality(dossier: CompanyDossier, config: ScoringConfig): Score
     reasons.push({
       label: 'Cash position',
       points,
-      detail: 'Cash is disclosed but cannot be sized against revenue.',
+      detail: 'Cash is disclosed but cannot be sized against revenue. A neutral half-score is applied.',
+    });
+  } else if (fin.latestCash === null) {
+    const points = rules.rules.cash_position.max / 2;
+    score += points;
+    reasons.push({
+      label: 'Cash position',
+      points,
+      detail: 'Cash is not disclosed. A neutral half-score is applied.',
     });
   }
 
@@ -184,6 +203,14 @@ function financialQuality(dossier: CompanyDossier, config: ScoringConfig): Score
       label: 'Balance sheet',
       points,
       detail: `Net assets of ${money(fin.latestNetAssets)}; no current ratio available.`,
+    });
+  } else {
+    const points = rules.rules.balance_sheet.max / 2;
+    score += points;
+    reasons.push({
+      label: 'Balance sheet',
+      points,
+      detail: 'No balance sheet figures are disclosed. A neutral half-score is applied.',
     });
   }
 
