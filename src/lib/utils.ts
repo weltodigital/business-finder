@@ -39,6 +39,19 @@ export function yearsOld(iso: string | null | undefined): number | null {
   return Math.floor((Date.now() - then) / (365.25 * 24 * 60 * 60 * 1000));
 }
 
+/**
+ * Age from a Companies House date of birth, which gives only month and year.
+ * Assumes the first of the month, so it can read a year high for a few weeks.
+ */
+export function ageFromBirth(dob: { month?: number; year?: number } | null | undefined): number | null {
+  if (!dob?.year) return null;
+  const now = new Date();
+  const month = dob.month ?? 1;
+  let age = now.getFullYear() - dob.year;
+  if (now.getMonth() + 1 < month) age--;
+  return age >= 0 && age < 120 ? age : null;
+}
+
 export function titleCase(value: string | null | undefined): string {
   if (!value) return '—';
   return value

@@ -79,6 +79,7 @@ export async function loadDossier(companyNumber: string): Promise<CompanyDossier
       natureOfControl: (row.nature_of_control as string[]) ?? [],
       notifiedOn: (row.notified_on as string) ?? null,
       ceasedOn: (row.ceased_on as string) ?? null,
+      dateOfBirth: (row.date_of_birth as { month?: number; year?: number }) ?? null,
       controlPercentFloor: controlPercentFloor((row.nature_of_control as string[]) ?? []),
     })),
     filings: ((filings.data ?? []) as Record<string, unknown>[]).map((row) => ({

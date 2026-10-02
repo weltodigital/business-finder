@@ -12,7 +12,7 @@ import { ScoreBreakdown } from '@/components/score-breakdown';
 import { FinancialChart, FinancialHistory, FinancialTrend } from '@/components/financials';
 import { SignalList } from '@/components/signals';
 import { sicDescription } from '@/lib/sic-descriptions';
-import { shortDate, titleCase, yearsOld } from '@/lib/utils';
+import { ageFromBirth, shortDate, titleCase, yearsOld } from '@/lib/utils';
 import { TargetActions } from './target-actions';
 import { AiAssessment } from './ai-assessment';
 import type { TargetAnalysis } from '@/lib/ai/analyse-target';
@@ -141,6 +141,7 @@ export default async function TargetPage({ params }: { params: { companyNumber: 
                       </div>
                       <div className="text-xs text-ink-muted">
                         {titleCase(director.role)} · appointed {shortDate(director.appointedOn)}
+                        {ageFromBirth(director.dateOfBirth) !== null ? ` · age ${ageFromBirth(director.dateOfBirth)}` : ''}
                         {director.occupation ? ` · ${director.occupation}` : ''}
                       </div>
                     </li>
@@ -159,6 +160,7 @@ export default async function TargetPage({ params }: { params: { companyNumber: 
                       <div className="text-xs text-ink-muted">
                         {psc.controlPercentFloor > 0 ? `${psc.controlPercentFloor}%+ control` : 'band not stated'} ·
                         notified {shortDate(psc.notifiedOn)}
+                        {ageFromBirth(psc.dateOfBirth) !== null ? ` · age ${ageFromBirth(psc.dateOfBirth)}` : ''}
                       </div>
                     </li>
                   ))}

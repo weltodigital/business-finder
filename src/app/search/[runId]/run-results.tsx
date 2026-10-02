@@ -17,13 +17,14 @@ interface RunState {
   error: string | null;
 }
 
-type SortKey = 'score' | 'revenue' | 'profit' | 'age' | 'growth' | 'incorporated';
+type SortKey = 'score' | 'revenue' | 'profit' | 'age' | 'ownerAge' | 'growth' | 'incorporated';
 
 const SORTS: { key: SortKey; label: string }[] = [
   { key: 'score', label: 'Acquisition score' },
   { key: 'revenue', label: 'Revenue' },
   { key: 'profit', label: 'Operating profit' },
   { key: 'age', label: 'Company age' },
+  { key: 'ownerAge', label: 'Oldest owner age' },
   { key: 'incorporated', label: 'Incorporation date' },
 ];
 
@@ -175,6 +176,7 @@ export function RunResults({ runId }: { runId: string }) {
                   <th className="text-right">Op. profit</th>
                   <th className="text-right">Age</th>
                   <th>Ownership</th>
+                  <th className="text-right" title="Oldest active director or owner">Oldest owner</th>
                   <th className="text-right">Succession</th>
                   <th className="text-right">Financial</th>
                   <th className="text-right">Score</th>
@@ -218,6 +220,7 @@ export function RunResults({ runId }: { runId: string }) {
                         <span className="text-ink-faint">Not owner controlled</span>
                       )}
                     </td>
+                    <td className="num">{row.oldestOwnerAge ?? '—'}</td>
                     <td className="num">{row.successionSignal === null ? '—' : `${row.successionSignal}/15`}</td>
                     <td className="num">
                       <div>{row.financialQuality === null ? '—' : `${row.financialQuality}/30`}</div>
@@ -294,6 +297,8 @@ function sortResults(rows: SearchResultRow[], key: SortKey): SearchResultRow[] {
       return sorted.sort((a, b) => nullsLast(b.revenue) - nullsLast(a.revenue));
     case 'profit':
       return sorted.sort((a, b) => nullsLast(b.operatingProfit) - nullsLast(a.operatingProfit));
+    case 'ownerAge':
+      return sorted.sort((a, b) => (b.oldestOwnerAge ?? -1) - (a.oldestOwnerAge ?? -1));
     case 'age':
       return sorted.sort((a, b) => (yearsOld(b.incorporationDate) ?? -1) - (yearsOld(a.incorporationDate) ?? -1));
     case 'incorporated':

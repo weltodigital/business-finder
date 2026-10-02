@@ -2,6 +2,7 @@ import { apiError, json, withUser } from '@/lib/api';
 import { getAdminClient } from '@/lib/supabase/admin';
 import { getServerClient } from '@/lib/supabase/server';
 import { sicDescription } from '@/lib/sic-descriptions';
+import { ageFromBirth } from '@/lib/utils';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,6 +24,8 @@ export interface SearchResultRow {
   operatingProfit: number | null;
   employees: number | null;
   ownerControlled: boolean;
+  /** Age of the oldest active director or individual owner (PSC). */
+  oldestOwnerAge: number | null;
   signals: { type: string; title: string; severity: string }[];
   saved: boolean;
 }
@@ -50,13 +53,28 @@ export const GET = withUser<{ id: string }>(async ({ params, user }) => {
   const companyIds = ((members ?? []) as { company_id: string }[]).map((m) => m.company_id);
   if (companyIds.length === 0) return json({ results: [] as SearchResultRow[] });
 
-  const [companies, scores, summaries, signals, targets] = await Promise.all([
+  const [companies, scores, summaries, signals, targets, directors, pscs] = await Promise.all([
     db.from('companies').select('id, company_number, name, region, postcode, incorporation_date, sic_codes, status').in('id', companyIds),
     db.from('company_scores').select('*').in('company_id', companyIds),
     db.from('company_financials_summary').select('*').in('company_id', companyIds),
     db.from('signals').select('company_id, signal_type, title, severity').in('company_id', companyIds),
     getServerClient().from('targets').select('company_id').eq('user_id', user.id).in('company_id', companyIds),
+    db.from('company_directors').select('company_id, directors(date_of_birth)').is('resigned_on', null).in('company_id', companyIds),
+    db.from('pscs').select('company_id, date_of_birth').is('ceased_on', null).in('company_id', companyIds),
   ]);
+
+  // Directors and owners are only stored for researched companies.
+  const oldestByCompany = new Map<string, number>();
+  const noteAge = (companyId: string, dob: unknown) => {
+    const age = ageFromBirth(dob as { month?: number; year?: number } | null);
+    if (age !== null && age > (oldestByCompany.get(companyId) ?? -1)) oldestByCompany.set(companyId, age);
+  };
+  for (const row of (directors.data ?? []) as Record<string, unknown>[]) {
+    noteAge(row.company_id as string, (row.directors as { date_of_birth?: unknown } | null)?.date_of_birth);
+  }
+  for (const row of (pscs.data ?? []) as Record<string, unknown>[]) {
+    noteAge(row.company_id as string, row.date_of_birth);
+  }
 
   const scoreByCompany = new Map<string, Record<string, unknown>>();
   for (const row of (scores.data ?? []) as Record<string, unknown>[]) {
@@ -120,6 +138,7 @@ export const GET = withUser<{ id: string }>(async ({ params, user }) => {
           ? null
           : Number(summary.latest_employee_count),
       ownerControlled: companySignals.some((s) => s.type === 'OWNER_CONTROLLED'),
+      oldestOwnerAge: oldestByCompany.get(id) ?? null,
       signals: companySignals.filter((s) => s.severity === 'positive' || s.severity === 'negative').slice(0, 4),
       saved: savedIds.has(id),
     };

@@ -42,6 +42,7 @@ export interface PscRecord {
   natureOfControl: string[];
   notifiedOn: string | null;
   ceasedOn: string | null;
+  dateOfBirth: { month?: number; year?: number } | null;
   /** Lower bound of the Companies House ownership band. */
   controlPercentFloor: number;
 }

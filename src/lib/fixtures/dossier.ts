@@ -63,6 +63,7 @@ export function dossierFromFixture(fixture: CompanyFixture, asOf = '2026-01-01')
       natureOfControl: psc.natures_of_control ?? [],
       notifiedOn: psc.notified_on ?? null,
       ceasedOn: psc.ceased_on ?? null,
+      dateOfBirth: psc.date_of_birth ?? null,
       controlPercentFloor: controlPercentFloor(psc.natures_of_control ?? []),
     })),
     filings: fixture.filings.map((filing) => ({
